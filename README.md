@@ -1,3 +1,5 @@
+simply fix windows running issues
+
 # apkutil
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/sterrasec/apkutil/blob/master/LICENSE)
