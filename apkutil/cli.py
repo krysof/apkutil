@@ -10,6 +10,7 @@ from . import util
 
 
 def cmd_set_debuggable(args):
+    import os
     print('Decoding APK by Apktool...')
     try:
         util.decode(args.apk_path)
@@ -18,25 +19,26 @@ def cmd_set_debuggable(args):
         print(Fore.RED + 'Failed')
         return
 
-    dir_path = args.apk_path.replace('.apk', '')
+    apk_path_abs = os.path.abspath(args.apk_path)
+    dir_path = os.path.splitext(apk_path_abs)[0]
     print('Potentially Sensitive Files:')
     util.check_sensitive_files(dir_path)
 
     print('Checking AndroidManifest.xml...')
-    manifest = manifestutil.ManifestUtil(dir_path + '/AndroidManifest.xml')
+    manifest_path = os.path.join(dir_path, 'AndroidManifest.xml')
+    manifest = manifestutil.ManifestUtil(manifest_path)
     manifest.check_all()
 
     print(Fore.CYAN + '\nSet debuggable attribute to true in AndroidManifest!')
     manifest.set_debuggable()
 
     print('\nBuilding APK by Apktool...')
-    dir_name = args.apk_path.replace('.apk', '')
     apk_path = args.output
-    if args.output is None:
-        apk_path = dir_name + ".patched.apk"
+    if apk_path is None:
+        apk_path = dir_path + ".patched.apk"
 
     try:
-        util.build(dir_name, apk_path, aapt2=args.aapt2)
+        util.build(dir_path, apk_path, aapt2=args.aapt2)
     except Exception as e:
         print(e)
         print(Fore.RED + 'Failed')
@@ -66,6 +68,7 @@ def cmd_set_debuggable(args):
 
 
 def cmd_set_network(args):
+    import os
     print('Decoding APK by Apktool...')
     try:
         util.decode(args.apk_path)
@@ -74,12 +77,14 @@ def cmd_set_network(args):
         print(Fore.RED + 'Failed')
         return
 
-    dir_path = args.apk_path.replace('.apk', '')
+    apk_path_abs = os.path.abspath(args.apk_path)
+    dir_path = os.path.splitext(apk_path_abs)[0]
     print('Potentially Sensitive Files:')
     util.check_sensitive_files(dir_path)
 
     print('Checking AndroidManifest.xml...')
-    manifest = manifestutil.ManifestUtil(dir_path + '/AndroidManifest.xml')
+    manifest_path = os.path.join(dir_path, 'AndroidManifest.xml')
+    manifest = manifestutil.ManifestUtil(manifest_path)
     manifest.check_all()
 
     print(Fore.CYAN + '\nSet networkSecurityConfig attribute to true in AndroidManifest!')
@@ -87,18 +92,17 @@ def cmd_set_network(args):
     util.make_network_security_config(dir_path)
 
     print('\nBuilding APK by Apktool...')
-    dir_name = args.apk_path.replace('.apk', '')
     apk_path = args.output
-    if args.output is None:
-        apk_path = dir_name + ".patched.apk"
+    if apk_path is None:
+        apk_path = dir_path + ".patched.apk"
 
     try:
-        util.build(dir_name, apk_path, aapt2=args.aapt2)
+        util.build(dir_path, apk_path, aapt2=args.aapt2)
     except Exception as e:
         print(e)
         print(Fore.RED + 'Failed')
         return
-    
+
     print('Aligning APK by zipalign...')
     try:
         result = util.align(apk_path)
@@ -123,6 +127,7 @@ def cmd_set_network(args):
 
 
 def cmd_all(args):
+    import os
     print('Decoding APK by Apktool...')
     try:
         result = util.decode(args.apk_path)
@@ -133,12 +138,14 @@ def cmd_all(args):
         print(Fore.RED + 'Failed')
         return
 
-    dir_path = args.apk_path.replace('.apk', '')
+    apk_path_abs = os.path.abspath(args.apk_path)
+    dir_path = os.path.splitext(apk_path_abs)[0]
     print('Potentially Sensitive Files:')
     util.check_sensitive_files(dir_path)
 
     print('Checking AndroidManifest.xml...')
-    manifest = manifestutil.ManifestUtil(dir_path + '/AndroidManifest.xml')
+    manifest_path = os.path.join(dir_path, 'AndroidManifest.xml')
+    manifest = manifestutil.ManifestUtil(manifest_path)
     manifest.check_all()
 
     print(Fore.CYAN + '\nSet debuggable attribute to true in AndroidManifest!')
@@ -149,13 +156,12 @@ def cmd_all(args):
     util.make_network_security_config(dir_path)
 
     print('\nBuilding APK by Apktool...')
-    dir_name = args.apk_path.replace('.apk', '')
     apk_path = args.output
-    if args.output is None:
-        apk_path = dir_name + ".patched.apk"
+    if apk_path is None:
+        apk_path = dir_path + ".patched.apk"
 
     try:
-        util.build(dir_name, apk_path, aapt2=args.aapt2)
+        util.build(dir_path, apk_path, aapt2=args.aapt2)
     except Exception as e:
         print(e)
         print(Fore.RED + 'Failed')
@@ -185,6 +191,7 @@ def cmd_all(args):
 
 
 def cmd_decode(args):
+    import os
     print('Decoding APK by Apktool...')
     try:
         result = util.decode(args.apk_path, no_res=args.no_res, no_src=args.no_src)
@@ -196,12 +203,14 @@ def cmd_decode(args):
         return
 
     if not args.no_res:
-        dir_path = args.apk_path.replace('.apk', '')
+        apk_path_abs = os.path.abspath(args.apk_path)
+        dir_path = os.path.splitext(apk_path_abs)[0]
         print('Potentially Sensitive Files:')
         util.check_sensitive_files(dir_path)
 
         print('Checking AndroidManifest.xml...')
-        manifest = manifestutil.ManifestUtil(dir_path + '/AndroidManifest.xml')
+        manifest_path = os.path.join(dir_path, 'AndroidManifest.xml')
+        manifest = manifestutil.ManifestUtil(manifest_path)
         manifest.check_all()
 
 def cmd_build(args):
