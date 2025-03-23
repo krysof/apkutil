@@ -16,13 +16,27 @@ ANDROID_HOME = os.environ.get('ANDROID_HOME', ANDROID_SDK_DEFAULT_PATH)
 
 def which_or_fail(cmd_name):
     path = shutil.which(cmd_name)
-    if not path:
-        raise FileNotFoundError(f"{cmd_name} not found. Please install and make sure it's in PATH.")
-    if os.name == 'nt' and not os.path.splitext(path)[1]:
-        for ext in ['.cmd', '.bat']:
-            if os.path.exists(path + ext):
-                return path + ext
-    return path
+    if path:
+        if os.name == 'nt':
+            # 手动尝试补上 .cmd/.bat 扩展名
+            for ext in ['.cmd', '.bat']:
+                if os.path.exists(path + ext):
+                    return path + ext
+        return path
+
+    # fallback: try ANDROID_HOME
+    if 'ANDROID_HOME' in os.environ:
+        sdk_path = os.environ['ANDROID_HOME']
+        candidates = glob.glob(os.path.join(sdk_path, 'build-tools', '*', cmd_name + '*'))
+        if candidates:
+            return candidates[0]
+
+    print(f"{cmd_name} not found.")
+    raise FileNotFoundError(f"{cmd_name} not found")
+
+    print(f"{cmd_name} not found.")
+    print(f"Please install {cmd_name} and ensure it's in PATH or under ANDROID_HOME.")
+    raise FileNotFoundError(f"{cmd_name} not found.")
 
 def run_subprocess(cmd, cwd=None):
     is_windows = os.name == 'nt'
@@ -105,8 +119,12 @@ def align(apk_path):
 
 def sign(apk_path):
     home_dir = os.environ.get('HOME', os.environ.get('USERPROFILE', ''))
+    local_path = os.path.join(os.getcwd(), "apkutil.json")
+    default_path = os.path.join(home_dir, "apkutil.json")
+
+    config_path = local_path if os.path.exists(local_path) else default_path
     try:
-        with open(os.path.join(home_dir, "apkutil.json")) as f:
+        with open(config_path, "r") as f:
             config = json.load(f)
         keystore_path = config['keystore_path'].replace('~', home_dir)
         ks_key_alias = config['ks-key-alias']
