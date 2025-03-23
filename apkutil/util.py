@@ -7,261 +7,210 @@ import json
 import os
 import subprocess
 from shutil import move
+import shutil
 from colorama import Fore
+
 
 ANDROID_SDK_DEFAULT_PATH = '/Library/Android/sdk/'
 ANDROID_HOME = os.environ.get('ANDROID_HOME', ANDROID_SDK_DEFAULT_PATH)
 
-def run_subprocess(cmd):
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def which_or_fail(cmd_name):
+    path = shutil.which(cmd_name)
+    if not path:
+        raise FileNotFoundError(f"{cmd_name} not found. Please install and make sure it's in PATH.")
+    if os.name == 'nt' and not os.path.splitext(path)[1]:
+        for ext in ['.cmd', '.bat']:
+            if os.path.exists(path + ext):
+                return path + ext
+    return path
+
+def run_subprocess(cmd, cwd=None):
+    is_windows = os.name == 'nt'
+    if is_windows and cmd[0].lower().endswith(('.cmd', '.bat')):
+        full_cmd = ['cmd.exe', '/c'] + cmd
+    else:
+        full_cmd = cmd
+
+    proc = subprocess.Popen(
+        full_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd or os.getcwd()
+    )
     outs, errs = proc.communicate()
-    return outs.decode('ascii'), errs.decode('ascii')
-
-def pull_apks(keyword):
-    try:
-        adb_path = glob.glob(ANDROID_HOME + '/platform-tools/adb')[0]
-
-        package_name = get_package_name(keyword)
-        if not package_name:
-            print(f"No package found matching keyword: {keyword}")
-            return False
-        
-        print(f"Package found: {package_name}")
-
-        apk_paths = get_apk_paths(package_name)
-        if not apk_paths:
-            print(f"No APK paths found for package: {package_name}")
-            return False
-
-        pull_apk_files(apk_paths)
-
-        print("APKs have been pulled to the current directory.")
-
-    except (IndexError, FileNotFoundError):
-        print('adb not found.')
-        print('Please install Android SDK Build Tools.')
-        return False
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return False
-        
-def get_package_name(keyword):
-    adb_path = glob.glob(ANDROID_HOME + '/platform-tools/adb')[0]
-    list_packages_cmd = [adb_path, 'shell', 'pm', 'list', 'packages']
-    outs, errs = run_subprocess(list_packages_cmd)
-    if (errs is not None) and (len(errs) != 0):
-        raise Exception(errs)
-
-    package_list = outs.strip().splitlines()
-    package_names = [line.split(":")[1] for line in package_list if keyword in line]
-    return package_names[0] if package_names else None
-
-def get_apk_paths(package_name):
-    adb_path = glob.glob(ANDROID_HOME + '/platform-tools/adb')[0]
-    path_cmd = [adb_path, 'shell', 'pm', 'path', package_name]
-    outs, errs = run_subprocess(path_cmd)
-    if (errs is not None) and (len(errs) != 0):
-        raise Exception(errs)
-
-    apk_paths = outs.strip().splitlines()
-    return [line.split(":")[1] for line in apk_paths]
-
-def pull_apk_files(apk_paths):
-    adb_path = glob.glob(ANDROID_HOME + '/platform-tools/adb')[0]
-    for apk_path in apk_paths:
-        print(f"Pulling {apk_path}...")
-        pull_cmd = [adb_path, 'pull', apk_path]
-        outs, errs = run_subprocess(pull_cmd)
-        if (outs is not None) and (len(outs) != 0):
-            print(outs)
-        if (errs is not None) and (len(errs) != 0):
-            raise Exception(errs)
+    return outs.decode('ascii', errors='ignore'), errs.decode('ascii', errors='ignore')
 
 def decode(apk_path, no_res=False, no_src=False):
-    apktool_cmd = ['apktool']
-    apktool_cmd.extend(['d', apk_path])
+    apktool_path = which_or_fail('apktool')
+    apk_path_abs = os.path.abspath(apk_path)
+    dir_path = os.path.splitext(apk_path_abs)[0]
 
+    apktool_cmd = [apktool_path, 'd', apk_path_abs, '-o', dir_path]
     if no_res:
-        apktool_cmd.extend(['-r'])
-
+        apktool_cmd.append('-r')
     if no_src:
-        apktool_cmd.extend(['-s'])
+        apktool_cmd.append('-s')
 
     try:
         outs, errs = run_subprocess(apktool_cmd)
-        if (outs is not None) and (len(outs) != 0):
+        if outs:
             print(outs)
-        
-        if (errs is not None) and (len(errs) != 0):
-            # unsupported `apktool d -f`
+        if errs:
             errs = errs.replace('Use -f switch if you want to overwrite it.', '')
             raise Exception(errs)
-        
-        return True
-
-    except FileNotFoundError as e:
-        print('apktool not found.')
-        print('Please install apktool')
-        return False
-
-
-def build(dir_name, apk_path, aapt2=False):
-    apktool_cmd = ['apktool']
-    apktool_cmd.extend(['b', dir_name])
-    apktool_cmd.extend(['-o', apk_path])
-
-    if aapt2:
-        apktool_cmd.extend(['--use-aapt2'])
-    
-    try:
-        outs, errs = run_subprocess(apktool_cmd)
-
-        is_built = False
-
-        if (outs is not None) and (len(outs) != 0):
-            if "I: Built apk..." in outs:
-                is_built = True
-
-            print(outs)
-        
-        if (errs is not None) and (len(errs) != 0) and not is_built:
-            raise Exception(errs)
-
-    except FileNotFoundError as e:
+        return dir_path
+    except FileNotFoundError:
         print('apktool not found.')
         print('Please install apktool.')
+        return None
+    except Exception as e:
+        print(str(e))
+        return None
+
+def build(dir_name, apk_path, aapt2=False):
+    apktool_cmd = [which_or_fail('apktool'), 'b', os.path.abspath(dir_name), '-o', os.path.abspath(apk_path)]
+    if aapt2:
+        apktool_cmd.append('--use-aapt2')
+    try:
+        outs, errs = run_subprocess(apktool_cmd)
+        if outs:
+            if "I: Built apk..." in outs:
+                print(outs)
+        if errs and "I: Built apk" not in outs:
+            raise Exception(errs)
+        return True
+    except FileNotFoundError:
+        print("apktool not found.")
+        return False
+    except Exception as e:
+        print(str(e))
         return False
 
 def align(apk_path):
     try:
-        zipalign_path = glob.glob(ANDROID_HOME + '/build-tools/*/zipalign')[0]
-        zipalign_cmd = [zipalign_path]
-        zipalign_cmd.append('-f')
-        zipalign_cmd.extend(['-p', '4'])
-        zipalign_cmd.append(apk_path)
-        zipalign_cmd.append('/tmp/apkutil_tmp.aligned.apk')
+        zipalign_path = which_or_fail('zipalign')
+        tmp_out = os.path.join(os.path.dirname(apk_path), "apkutil_tmp.aligned.apk")
+        zipalign_cmd = [zipalign_path, '-f', '-p', '4', apk_path, tmp_out]
         _, errs = run_subprocess(zipalign_cmd)
-        if len(errs) != 0:
+        if errs:
             raise Exception(errs)
-
-        move('/tmp/apkutil_tmp.aligned.apk', apk_path)
+        move(tmp_out, apk_path)
         return True
-
-    except (IndexError, FileNotFoundError) as e:
-        print('zipalign not found.')
-        print('Please install Android SDK Build Tools.')
+    except FileNotFoundError:
+        print("zipalign not found.")
+        return False
+    except Exception as e:
+        print(str(e))
         return False
 
 def sign(apk_path):
-    home_dir = os.environ['HOME']
-    keystore_path = ''
-    ks_key_alias = ''
-    ks_pass = ''
-
+    home_dir = os.environ.get('HOME', os.environ.get('USERPROFILE', ''))
     try:
-        with open(home_dir + "/apkutil.json") as f:
+        with open(os.path.join(home_dir, "apkutil.json")) as f:
             config = json.load(f)
-            keystore_path = config['keystore_path'].replace('~', home_dir)
-            ks_key_alias = config['ks-key-alias']
-            ks_pass = config['ks-pass']
-
+        keystore_path = config['keystore_path'].replace('~', home_dir)
+        ks_key_alias = config['ks-key-alias']
+        ks_pass = config['ks-pass']
     except:
-        print('Please place `~/apkutil.json` containing the keystore information')
+        print("Missing or invalid ~/apkutil.json")
         return False
 
     try:
         if not os.path.isfile(apk_path):
-            errs = '{0} is not found.'.format(apk_path)
-            raise Exception(errs)
+            raise Exception(f"{apk_path} not found.")
 
-        apksigner_path = glob.glob(ANDROID_HOME + '/build-tools/*/apksigner')[0]
-        apksigner_cmd = [apksigner_path]
-        apksigner_cmd.append('sign')
-        apksigner_cmd.extend(['-ks', keystore_path])
-        apksigner_cmd.extend(['--v2-signing-enabled', 'true'])
-        apksigner_cmd.append('-v')
-        apksigner_cmd.extend(['--ks-key-alias', ks_key_alias])
-        apksigner_cmd.extend(['--ks-pass', ks_pass])
-        apksigner_cmd.append(apk_path)
+        apksigner_path = which_or_fail('apksigner')
+        apksigner_cmd = [
+            apksigner_path, 'sign',
+            '-ks', keystore_path,
+            '--v2-signing-enabled', 'true',
+            '-v',
+            '--ks-key-alias', ks_key_alias,
+            '--ks-pass', ks_pass,
+            apk_path
+        ]
         outs, errs = run_subprocess(apksigner_cmd)
-        if (outs is not None) and (len(outs) != 0):
+        if outs:
             print(Fore.CYAN + outs)
-        
-        if (errs is not None) and (len(errs) != 0):
+        if errs:
             print(Fore.RED + errs)
             return False
-        
         return True
-
-    except (IndexError, FileNotFoundError) as e:
-        print('apksigner not found.')
-        print('Please install Android SDK Build Tools.')
+    except FileNotFoundError:
+        print("apksigner not found.")
         return False
-
+    except Exception as e:
+        print(str(e))
+        return False
 
 def get_packagename(apk_path):
     try:
-        aapt_path = glob.glob(ANDROID_HOME + '/build-tools/*/aapt')[0]
-        aapt_cmd = [aapt_path]
-        aapt_cmd.append('l')
-        aapt_cmd.append('-a')
-        aapt_cmd.append(apk_path)
+        aapt_path = which_or_fail('aapt')
+        aapt_cmd = [aapt_path, 'l', '-a', apk_path]
         aapt_proc = subprocess.Popen(aapt_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        grep_proc = subprocess.Popen(["grep", "A: package"], stdin=aapt_proc.stdout)
+        grep_proc = subprocess.Popen(['findstr', 'A: package'], stdin=aapt_proc.stdout)
         aapt_proc.stdout.close()
         outs, errs = grep_proc.communicate()
-        outs, errs = outs.decode('ascii'), errs.decode('ascii')
-        if (outs is not None) and (len(outs) != 0):
+        outs, errs = outs.decode('ascii', errors='ignore'), errs.decode('ascii', errors='ignore')
+        if outs:
             print(outs)
-
-        if (errs is not None) and (len(errs) != 0):
+        if errs:
             raise Exception(errs)
-        
         return True
-
-    except (IndexError, FileNotFoundError) as e:
-        print('apksigner not found.')
-        print('Please install Android SDK Build Tools.')
+    except FileNotFoundError:
+        print("aapt not found.")
+        return False
+    except Exception as e:
+        print(str(e))
         return False
 
 def get_screenshot():
     try:
-        adb_path = glob.glob(ANDROID_HOME + '/platform-tools/adb')[0]
+        adb_path = glob.glob(os.path.join(ANDROID_HOME, 'platform-tools', 'adb'))[0]
         now = datetime.datetime.now()
         timestamp = now.strftime("%Y-%m-%d-%H-%M-%S")
-        screenshot_file = 'screenshot-' + timestamp + '.png'
-        screenshot_path = '/data/local/tmp/' + screenshot_file
+        screenshot_file = f'screenshot-{timestamp}.png'
+        screenshot_path = f'/data/local/tmp/{screenshot_file}'
 
-        screencap_cmd = [adb_path]
-        screencap_cmd.append('shell')
-        screencap_cmd.append('screencap')
-        screencap_cmd.extend(['-p', screenshot_path])
-        _, errs = run_subprocess(screencap_cmd)
-        if (errs is not None) and (len(errs) != 0):
-            raise Exception(errs)
-
-        pull_cmd = [adb_path]
-        pull_cmd.append('pull')
-        pull_cmd.append(screenshot_path)
-        _, errs = run_subprocess(pull_cmd)
-        # Logs are output to stderr even if command execution is successful.
-        print(errs)
-
-        rm_cmd = [adb_path]
-        rm_cmd.append('shell')
-        rm_cmd.append('rm')
-        rm_cmd.append(screenshot_path)
-        _, errs = run_subprocess(rm_cmd)
-        if (errs is not None) and (len(errs) != 0):
-            print(errs)
+        run_subprocess([adb_path, 'shell', 'screencap', '-p', screenshot_path])
+        run_subprocess([adb_path, 'pull', screenshot_path])
+        run_subprocess([adb_path, 'shell', 'rm', screenshot_path])
 
         return screenshot_file
-
-    except (IndexError, FileNotFoundError) as e:
-        print('adb not found.')
-        print('Please install Android SDK Build Tools.')
+    except (IndexError, FileNotFoundError):
+        print("adb not found.")
         return False
 
+def pull_apks(keyword):
+    try:
+        adb_path = glob.glob(os.path.join(ANDROID_HOME, 'platform-tools', 'adb'))[0]
+        package_name = get_package_name(keyword)
+        if not package_name:
+            print(f"No package found for: {keyword}")
+            return False
+        apk_paths = get_apk_paths(package_name)
+        for apk_path in apk_paths:
+            print(f"Pulling {apk_path}...")
+            run_subprocess([adb_path, 'pull', apk_path])
+        return True
+    except:
+        print("Error during pull_apks.")
+        return False
+
+def get_package_name(keyword):
+    adb_path = glob.glob(os.path.join(ANDROID_HOME, 'platform-tools', 'adb'))[0]
+    outs, errs = run_subprocess([adb_path, 'shell', 'pm', 'list', 'packages'])
+    if errs:
+        raise Exception(errs)
+    pkgs = [line.split(":")[1] for line in outs.strip().splitlines() if keyword in line]
+    return pkgs[0] if pkgs else None
+
+def get_apk_paths(package_name):
+    adb_path = glob.glob(os.path.join(ANDROID_HOME, 'platform-tools', 'adb'))[0]
+    outs, errs = run_subprocess([adb_path, 'shell', 'pm', 'path', package_name])
+    if errs:
+        raise Exception(errs)
+    return [line.split(":")[1] for line in outs.strip().splitlines()]
 
 def check_sensitive_files(target_path):
     types = ('**/*.md', '**/*.cpp', '**/*.c', '**/*.h', '**/*.java', '**/*.kts',
@@ -271,37 +220,26 @@ def check_sensitive_files(target_path):
     found_files = []
     for file_type in types:
         found_files.extend(glob.glob(os.path.join(target_path, file_type), recursive=True))
-    
-    sensitive_files = []
-    for found_file in found_files:
-        allow_flag = False
-        for allow_file in allow_list:
-            if found_file.endswith(allow_file):
-                allow_flag = True
-                break
-        if not allow_flag:
-            sensitive_files.append(found_file)
-
-    if len(sensitive_files) == 0:
+    sensitive_files = [f for f in found_files if not any(f.endswith(a) for a in allow_list)]
+    if not sensitive_files:
         print(Fore.BLUE + 'None')
     else:
-        for sensitive_file in sensitive_files:
-            print(Fore.RED + sensitive_file)
-    print('')
+        for f in sensitive_files:
+            print(Fore.RED + f)
     return sensitive_files
 
 def make_network_security_config(target_path):
-    xml_path = os.path.join(target_path, 'res/xml')
-    if not os.path.exists(xml_path):
-        os.makedirs(xml_path)
-
-    with open(os.path.join(target_path, 'res/xml/network_security_config.xml'),'w') as f:
-        f.write('<?xml version="1.0" encoding="utf-8"?>\n' +
-            '<network-security-config>\n' +
-            '    <base-config>\n' +
-            '        <trust-anchors>\n' +
-            '            <certificates src="system" />\n' +
-            '            <certificates src="user" />\n' +
-            '        </trust-anchors>\n' +
-            '    </base-config>\n' +
-            '</network-security-config>')
+    xml_path = os.path.join(target_path, 'res', 'xml')
+    os.makedirs(xml_path, exist_ok=True)
+    with open(os.path.join(xml_path, 'network_security_config.xml'), 'w') as f:
+        f.write(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<network-security-config>\n'
+            '    <base-config>\n'
+            '        <trust-anchors>\n'
+            '            <certificates src="system" />\n'
+            '            <certificates src="user" />\n'
+            '        </trust-anchors>\n'
+            '    </base-config>\n'
+            '</network-security-config>'
+        )
